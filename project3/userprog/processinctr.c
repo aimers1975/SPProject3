@@ -117,7 +117,7 @@ start_process (void *childptr)
 
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
-volatile int child_done = 0;
+int child_done =0;
 int
 process_wait (tid_t child_tid UNUSED) 
 {

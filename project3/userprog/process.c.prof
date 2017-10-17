@@ -64,7 +64,7 @@ process_execute (const char *cmd_string)
  
 
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (child.args[0].name, PRI_DEFAULT, start_process, &child);
+  tid = thread_create (cmd_copy, PRI_DEFAULT, start_process, &child);
   if (tid == TID_ERROR)
     palloc_free_page (cmd_copy); 
   return tid;
@@ -117,11 +117,10 @@ start_process (void *childptr)
 
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
-volatile int child_done = 0;
 int
 process_wait (tid_t child_tid UNUSED) 
 {
-    while(!child_done){}
+    while(1){}
     return -1;
 }
 
@@ -132,7 +131,6 @@ process_exit (void)
   struct thread *cur = thread_current ();
   uint32_t *pd;
 
-  child_done = 1;
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;

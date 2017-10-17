@@ -18,53 +18,52 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
-// Each argv has a null-terminated string of characters
-typedef struct{
-  char *name;
+// AMY_R: Each argv has a null-terminated string of characters
+typedef struct {
+  char* name;
   int len;
 }args_t;
 
-typedef  struct  {
+typedef struct {
   int argc;
   args_t args[100];
-} child_t;
-
+}child_t;
+static bool setup_stack (void **esp, child_t*);
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
-static bool setup_stack (void **esp, child_t *child );
 
 /* Starts a new thread running a user program loaded from
-   first sub-string of cmd_string.  The new thread may be scheduled (and may even exit)
+   first substring of cmd_string.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
-   thread id, or TID_ERROR if the thread cannot be created. */
+   thread id, or TID_ERROR if the thread cannot be created.
+AMY_R - changed to cmd_string */
 tid_t
 process_execute (const char *cmd_string) 
 {
-    char *cmd_copy, *saveptr, *token;
+  char *cmd_copy, *saveptr, *token;
   tid_t tid;
-  int i;
   child_t child;
-
+  int i;
+  
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   cmd_copy = palloc_get_page (0);
   if (cmd_copy == NULL)
     return TID_ERROR;
   strlcpy (cmd_copy, cmd_string, PGSIZE);
-
   /* Parse cmd_string into args */
-  for(i=0; ;i++,cmd_string = NULL){
-      token = strtok_r(cmd_string, " ", &saveptr);
-      child.args[i].name = token;
-      if (token == NULL)
-          break;
-      child.args[i].len = strlen(token);
+
+  for(i=0;; i++,cmd_string = NULL) {
+    token = strtok_r(cmd_string, " ", &saveptr);
+    child.args[i].name = token;
+    if(token == NULL)
+      break;
+    child.args[i].len = strlen(token);
   }
   child.argc = i;
- 
 
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (child.args[0].name, PRI_DEFAULT, start_process, &child);
+  tid = thread_create (cmd_copy, PRI_DEFAULT, start_process, &child);
   if (tid == TID_ERROR)
     palloc_free_page (cmd_copy); 
   return tid;
@@ -75,7 +74,8 @@ process_execute (const char *cmd_string)
 static void
 start_process (void *childptr)
 {
-  child_t *child = (child_t *)childptr;
+//AMY-R - filename is very first argument of child string
+  child_t* child = (child_t*) childptr;
   struct intr_frame if_;
   bool success;
 
@@ -84,20 +84,18 @@ start_process (void *childptr)
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  // Load executable into memory
   success = load (child->args[0].name, &if_.eip, &if_.esp);
 
   /* If load failed, quit. */
-  //  palloc_free_page (file_name);
+  //palloc_free_page (file_name);
   if (!success) 
     thread_exit ();
 
-  /* Set up stack. to put args on stack
-     args in the child structure */
-  if (!setup_stack (&if_.esp, child))
-      thread_exit();
+ /* AMY_R Set up stack. */
+  if(!setup_stack (&if_.esp, child))
+    thread_exit ();
 
-  
+
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -117,12 +115,12 @@ start_process (void *childptr)
 
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
-volatile int child_done = 0;
 int
 process_wait (tid_t child_tid UNUSED) 
 {
-    while(!child_done){}
-    return -1;
+  while(1) {
+  return -1;
+  }
 }
 
 /* Free the current process's resources. */
@@ -132,7 +130,6 @@ process_exit (void)
   struct thread *cur = thread_current ();
   uint32_t *pd;
 
-  child_done = 1;
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;
@@ -230,6 +227,7 @@ struct Elf32_Phdr
 #define PF_W 2          /* Writable. */
 #define PF_R 4          /* Readable. */
 
+//static bool setup_stack (void **esp, child_t* child);
 static bool validate_segment (const struct Elf32_Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
@@ -335,9 +333,9 @@ load (const char *file_name, void (**eip) (void), void **esp)
         }
     }
 
-  /* Set up stack.
-  if (!setup_stack (esp))
-    goto done; */
+  /* Set up stack. */
+  //if (!setup_stack (esp))
+  //  goto done;
 
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
@@ -461,52 +459,55 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
 static bool
-setup_stack (void **esp, child_t *child ) 
+setup_stack (void **esp, child_t* child) 
 {
   uint8_t *kpage;
   bool success = false;
-  int i;
-  
+
   union {
-      uint8_t *byte;
-      uint32_t *word;
+    uint8_t *byte;
+    uint32_t *word;
   }mySP;
-  
-  kpage = palloc_get_page (PAL_USER | PAL_ZERO); // Get a page from user pool
+
+  kpage = palloc_get_page (PAL_USER | PAL_ZERO); // AMY_R allocation a page, gets
+                                                 // a page from user pool
   if (kpage != NULL) 
     {
+      // AMY_R Install the page at physbase - pagesize, if successful...set stack pointer here
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
         *esp = PHYS_BASE;
       else
         palloc_free_page (kpage);
     }
-  mySP.byte = *esp; // start at bottom
-  for(i = child->argc-1; i >=0; i--){
-      mySP.byte -= child->args[i].len+1; //go by len up
-      strlcpy(mySP.byte, child->args[i].name,child->args[i].len+1); //copy bytes
-      child->args[i].name = mySP.byte;//save the location in stack where the bytes are
-                                      // for later use
+  mySP.byte = *esp; // AMY_R: Will be starting by adding characters, so that is why we start with a byte
+                    // Starting at bottom
+  for(int i = child->argc-1; i >=0; i--) {
+    mySP.byte -= child->args[i].len+1;  //include the null, go by len up...
+    strlcpy(mySP.byte, child->args[i].name, child->args[i].len+1); // Copy bytes
+    child->args[i].name = mySP.byte; // Overwrite with a pointer to where it is on the stack.  This is where we put the bytes.
+                                     // we will use these later....
   }
-  //pad bytes to align at word
-  i = ((uint32_t)mySP.byte %4);
-  mySP.byte -= i;
+  // pad bytes to align at word
+  int i = ((uint32_t)mySP.byte %4);
+  mySP.byte -=i;
 
   // Put null pointer
   mySP.word -= 1;
   *mySP.word = 0;
-  // write pointers now
-  for(i = child->argc-1; i >=0; i--){
-      mySP.word -= 1;
-      *mySP.word = (uint32_t *)child->args[i].name;
+
+  for(i = child->argc-1; i>=0; i--) {
+    mySP.word -=1;
+    *mySP.word = (uint32_t*)child->args[i].name;
   }
-  *(mySP.word-1) = mySP.word; // argv has &argv[0]
+
+  *(mySP.word -1) = mySP.word; // argv points to &argv[0]
   mySP.word -= 2;
   *mySP.word = child->argc;
   mySP.word -= 1;
-  *mySP.word = 0; // The return address is on top
-  *esp = mySP.word; // Update esp;
-  
+  *mySP.word = 0;  // The return address should be on top of stack
+  *esp = mySP.word; //Update esp
+
   return success;
 }
 
