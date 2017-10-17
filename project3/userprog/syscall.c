@@ -3,6 +3,7 @@
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "filesys/filesys.h"
 
 static void syscall_handler (struct intr_frame *);
 
@@ -13,6 +14,7 @@ syscall syscall_tab[20]; // for all syscalls possible
 uint32_t syscall_nArgs[20];
 
 typedef uint32_t pid_t; 
+
 
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
@@ -120,6 +122,8 @@ int sys_wait (pid_t pid){
       operation which would require a open system call.
 */
 bool sys_create (const char *file, unsigned initial_size){
+
+    return filesys_create (file, initial_size);
 }
 
 /*
@@ -129,6 +133,7 @@ bool sys_create (const char *file, unsigned initial_size){
     Removing an Open File, for details.
 */
 bool sys_remove (const char *file){
+    return filesys_remove (file);
 }
 
 /*    Opens the file called file. Returns a nonnegative integer handle
@@ -151,6 +156,18 @@ bool sys_remove (const char *file){
     share a file position.
     */
 int sys_open (const char *file){
+    
+    struct file * testfile1 = filesys_open (file);
+    struct thread *t = thread_current();
+    if(testfile1 != NULL) {
+        int currfd = t->curr_file_descriptor;
+        t->file_descriptors[t->curr_file_descriptor] = testfile1;
+        t->curr_file_descriptor++;
+        return currfd;
+    } else {
+        return -1;
+    }
+
 }
 
 /*    Returns the size, in bytes, of the file open as fd. 
@@ -222,6 +239,12 @@ unsigned sys_tell (int fd){
     this function for each one.
 */
 void sys_close (int fd){
+
+    struct thread *t = thread_current();
+    if(fd > 1) {
+        t->file_descriptors[fd] = NULL;
+    }
+
 }
 
 void
