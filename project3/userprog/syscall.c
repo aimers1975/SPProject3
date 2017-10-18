@@ -4,14 +4,24 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "filesys/filesys.h"
+#include "threads/synch.h"
+#include "threads/init.h"
+
+#define MAX_FD 20;
 
 static void syscall_handler (struct intr_frame *);
+void check_fs_lock();
 
 typedef uint32_t (*syscall)(uint32_t, uint32_t, uint32_t);
 /* syscal is typedef'ed to a function pointers that
    takes three uint32_t's and returns a unit32_t */
 syscall syscall_tab[20]; // for all syscalls possible
 uint32_t syscall_nArgs[20];
+
+
+
+struct lock fs_lock;
+bool fs_lock_initialized = false;
 
 typedef uint32_t pid_t; 
 
@@ -31,11 +41,12 @@ syscall_handler (struct intr_frame *f UNUSED)
     f->eax = syscall_tab[callno](args[0],args[1],args[2]);
 }
 
+
 /*    Terminates Pintos by calling shutdown_power_off() (declared in
       "threads/init.h"). This should be seldom used, because you lose
       some information about possible deadlock situations, etc. */
 void sys_halt (void){
-
+    shutdown_power_off();
 }
 
 /*    Terminates the current user program, returning status to the
@@ -122,8 +133,11 @@ int sys_wait (pid_t pid){
       operation which would require a open system call.
 */
 bool sys_create (const char *file, unsigned initial_size){
-
-    return filesys_create (file, initial_size);
+    check_fs_lock();
+    lock_acquire(&fs_lock);
+    bool result = filesys_create (file, initial_size);
+    lock_release(&fs_lock);
+    return result;
 }
 
 /*
@@ -133,7 +147,11 @@ bool sys_create (const char *file, unsigned initial_size){
     Removing an Open File, for details.
 */
 bool sys_remove (const char *file){
-    return filesys_remove (file);
+    check_fs_lock();
+    lock_acquire(&fs_lock);
+    bool result = filesys_remove (file);
+    lock_release(&fs_lock);
+    return result;
 }
 
 /*    Opens the file called file. Returns a nonnegative integer handle
@@ -156,15 +174,19 @@ bool sys_remove (const char *file){
     share a file position.
     */
 int sys_open (const char *file){
-    
+
+    check_fs_lock();
+    lock_acquire(&fs_lock);    
     struct file * testfile1 = filesys_open (file);
     struct thread *t = thread_current();
     if(testfile1 != NULL) {
         int currfd = t->curr_file_descriptor;
         t->file_descriptors[t->curr_file_descriptor] = testfile1;
         t->curr_file_descriptor++;
+        lock_release(&fs_lock);
         return currfd;
     } else {
+        lock_release(&fs_lock);
         return -1;
     }
 
@@ -173,12 +195,44 @@ int sys_open (const char *file){
 /*    Returns the size, in bytes, of the file open as fd. 
  */
 int sys_filesize (int fd){
-
+    int result = 0;
+    if(fd > 1) {
+        check_fs_lock();
+        lock_acquire(&fs_lock);
+        struct thread *t = thread_current();
+        struct file *this_file = t->file_descriptors[fd];
+        if(this_file != NULL) {
+            result = file_length (this_file);
+        }
+        lock_release(&fs_lock);           
+    } 
+    return result;
 }
 /*
     Reads size bytes from the file open as fd into buffer. Returns the number of bytes actually read (0 at end of file), or -1 if the file could not be read (due to a condition other than end of file). Fd 0 reads from the keyboard using input_getc(). 
 */
 int sys_read (int fd, void *buffer, unsigned size){
+    if (fd ==0){
+        int i;
+        for(i=0; i<size; i++) {
+            *(char*)buffer = input_getc();
+            buffer++;
+        }
+        return size;
+    } else if (fd > 1) {
+        check_fs_lock();
+        lock_acquire(&fs_lock);
+        struct thread *t = thread_current();
+        struct file *this_file = t->file_descriptors[fd];
+        if(this_file != NULL) {
+
+            off_t bytes_read = file_read (this_file, buffer, size);
+            lock_release(&fs_lock);
+            return bytes_read;
+        }
+        lock_release(&fs_lock);
+    }
+    return -1;
 
 }
 
@@ -203,8 +257,21 @@ int sys_read (int fd, void *buffer, unsigned size){
 int sys_write (int fd, const void *buffer, unsigned size){
 
     if (fd ==1){
-	putbuf(buffer,size);
+	    putbuf(buffer,size);
+        return size;
+    } else if (fd > 1) {
+        check_fs_lock();
+        lock_acquire(&fs_lock);
+        struct thread *t = thread_current();
+        struct file *this_file = t->file_descriptors[fd];
+        if(this_file != NULL) {
+            off_t bytes_written = file_write (this_file, buffer, size);
+            lock_release(&fs_lock);
+            return bytes_written;
+        }
+        lock_release(&fs_lock);
     }
+    return 0;
 }
 
 
@@ -240,11 +307,26 @@ unsigned sys_tell (int fd){
 */
 void sys_close (int fd){
 
+    check_fs_lock();
+    lock_acquire(&fs_lock);
     struct thread *t = thread_current();
     if(fd > 1) {
-        t->file_descriptors[fd] = NULL;
+        struct file* close_file = t->file_descriptors[fd];
+        if(close_file != NULL) {  
+            file_close (close_file);
+            t->file_descriptors[fd] = NULL;
+        }
     }
+    lock_release(&fs_lock);
 
+}
+
+void check_fs_lock() {
+   if(!fs_lock_initialized) {
+       //fs_lock = malloc(sizeof(struct lock*));
+       lock_init(&fs_lock);
+       fs_lock_initialized = true;
+   }
 }
 
 void
@@ -304,6 +386,4 @@ syscall_init (void)
   //  SYS_CLOSE,                  /* Close a file. */
   syscall_tab[SYS_CLOSE] = (syscall)&sys_close;
   syscall_nArgs[SYS_CLOSE] = 1;
-
-
 }

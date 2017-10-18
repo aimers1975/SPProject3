@@ -1,5 +1,6 @@
 #ifndef THREADS_THREAD_H
 #define THREADS_THREAD_H
+#define MAX_FD 200
 
 #include <debug.h>
 #include <list.h>
@@ -103,7 +104,7 @@ struct thread
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
-    struct file * file_descriptors[200];
+    struct file * file_descriptors[MAX_FD];
     int curr_file_descriptor;
 
   };
