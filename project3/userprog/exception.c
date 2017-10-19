@@ -119,6 +119,12 @@ kill (struct intr_frame *f)
    can find more information about both of these in the
    description of "Interrupt 14--Page Fault Exception (#PF)" in
    [IA32-v3a] section 5.15 "Exception and Interrupt Reference". */
+
+/* AMY CARMINA TODO: Per assignment documentation to handle bad pointers...We need to:
+   An invalid user pointer will cause a "page fault" that you can handle by 
+   modifying the code for page_fault() in "userprog/exception.c". Need to
+   modify page_fault() so that a page fault in the kernel merely sets eax 
+   to 0xffffffff and copies its former value into eip.*/ 
 static void
 page_fault (struct intr_frame *f) 
 {
