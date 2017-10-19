@@ -6,6 +6,7 @@
 #include "filesys/filesys.h"
 #include "threads/synch.h"
 #include "threads/init.h"
+#include "threads/vaddr.h"
 
 #define MAX_FD 20;
 
@@ -25,6 +26,9 @@ bool fs_lock_initialized = false;
 
 typedef uint32_t pid_t; 
 
+static int get_user (const uint8_t *uaddr);
+static bool put_user (uint8_t *udst, uint8_t byte);
+void check_ptr(const char *file);
 
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
@@ -136,6 +140,7 @@ bool sys_create (const char *file, unsigned initial_size){
 
     bool result = false;
     if(file != NULL) {
+        check_ptr(file);
         check_fs_lock();
         lock_acquire(&fs_lock);
         result = filesys_create (file, initial_size);
@@ -146,6 +151,14 @@ bool sys_create (const char *file, unsigned initial_size){
     return result;
 }
 
+void check_ptr(const char *file) {
+    if(file < PHYS_BASE) {
+        int ret = get_user(file);
+        if(ret < 0) {
+            sys_exit(-1);
+        }
+    }
+}
 /*
     Deletes the file called file. Returns true if successful, false
     otherwise. A file may be removed regardless of whether it is open
@@ -155,6 +168,7 @@ bool sys_create (const char *file, unsigned initial_size){
 bool sys_remove (const char *file){
     bool result = false;
     if(file != NULL) {
+        check_ptr(file);
         check_fs_lock();
         lock_acquire(&fs_lock);
         result = filesys_remove (file);
@@ -187,6 +201,7 @@ bool sys_remove (const char *file){
 int sys_open (const char *file){
     int result = -1;
     if(file != NULL) {
+        check_ptr(file);
         check_fs_lock();
         lock_acquire(&fs_lock);    
         struct file * testfile1 = filesys_open (file);
@@ -226,6 +241,7 @@ int sys_filesize (int fd){
     Reads size bytes from the file open as fd into buffer. Returns the number of bytes actually read (0 at end of file), or -1 if the file could not be read (due to a condition other than end of file). Fd 0 reads from the keyboard using input_getc(). 
 */
 int sys_read (int fd, void *buffer, unsigned size){
+    check_ptr(buffer);
     if (fd ==0){
         int i;
         for(i=0; i<size; i++) {
