@@ -343,6 +343,35 @@ void check_fs_lock() {
    }
 }
 
+ 	
+
+/* Reads a byte at user virtual address UADDR. UADDR must be below PHYS_BASE. Returns the byte value if successful, -1 if a segfault
+   occurred. This function assumes that the user address has already been verified to be below PHYS_BASE and assumes 
+   that you've modified page_fault() so that a page fault in the kernel merely sets eax to 0xffffffff and copies its
+   former value into eip.*/
+static int
+get_user (const uint8_t *uaddr)
+{
+  int result;
+  asm ("movl $1f, %0; movzbl %1, %0; 1:"
+       : "=&a" (result) : "m" (*uaddr));
+  return result;
+}
+ 
+/* Writes BYTE to user address UDST. UDST must be below PHYS_BASE. Returns true if successful, false if a segfault occurred. 
+   This function assumes that the user address has already been verified to be below PHYS_BASE and assumes 
+   that you've modified page_fault() so that a page fault in the kernel merely sets eax to 0xffffffff and copies its
+   former value into eip.*/
+static bool
+put_user (uint8_t *udst, uint8_t byte)
+{
+  int error_code;
+  asm ("movl $1f, %0; movb %b2, %1; 1:"
+       : "=&a" (error_code), "=m" (*udst) : "q" (byte));
+  return error_code != -1;
+}
+ 
+
 void
 syscall_init (void) 
 {
