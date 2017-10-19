@@ -133,10 +133,16 @@ int sys_wait (pid_t pid){
       operation which would require a open system call.
 */
 bool sys_create (const char *file, unsigned initial_size){
-    check_fs_lock();
-    lock_acquire(&fs_lock);
-    bool result = filesys_create (file, initial_size);
-    lock_release(&fs_lock);
+
+    bool result = false;
+    if(file != NULL) {
+        check_fs_lock();
+        lock_acquire(&fs_lock);
+        result = filesys_create (file, initial_size);
+        lock_release(&fs_lock);
+    } else {
+        sys_exit(-1);
+    }
     return result;
 }
 
@@ -147,10 +153,15 @@ bool sys_create (const char *file, unsigned initial_size){
     Removing an Open File, for details.
 */
 bool sys_remove (const char *file){
-    check_fs_lock();
-    lock_acquire(&fs_lock);
-    bool result = filesys_remove (file);
-    lock_release(&fs_lock);
+    bool result = false;
+    if(file != NULL) {
+        check_fs_lock();
+        lock_acquire(&fs_lock);
+        result = filesys_remove (file);
+        lock_release(&fs_lock);
+    } else {
+        sys_exit(-1);
+    }
     return result;
 }
 
@@ -174,22 +185,25 @@ bool sys_remove (const char *file){
     share a file position.
     */
 int sys_open (const char *file){
-
-    check_fs_lock();
-    lock_acquire(&fs_lock);    
-    struct file * testfile1 = filesys_open (file);
-    struct thread *t = thread_current();
-    if(testfile1 != NULL) {
-        int currfd = t->curr_file_descriptor;
-        t->file_descriptors[t->curr_file_descriptor] = testfile1;
-        t->curr_file_descriptor++;
-        lock_release(&fs_lock);
-        return currfd;
+    int result = -1;
+    if(file != NULL) {
+        check_fs_lock();
+        lock_acquire(&fs_lock);    
+        struct file * testfile1 = filesys_open (file);
+        struct thread *t = thread_current();
+        if(testfile1 != NULL) {
+            int currfd = t->curr_file_descriptor;
+            t->file_descriptors[t->curr_file_descriptor] = testfile1;
+            t->curr_file_descriptor++;
+            lock_release(&fs_lock);
+            return currfd;
+        } else {
+            lock_release(&fs_lock);
+            return -1;
+        }
     } else {
-        lock_release(&fs_lock);
-        return -1;
+        sys_exit(-1);
     }
-
 }
 
 /*    Returns the size, in bytes, of the file open as fd. 
