@@ -304,6 +304,17 @@ int sys_write (int fd, const void *buffer, unsigned size){
 
 void sys_seek (int fd, unsigned position){
 
+    if (fd > 1) {
+        check_fs_lock();
+        lock_acquire(&fs_lock);
+        struct thread *t = thread_current();
+        struct file *this_file = t->file_descriptors[fd];
+        if(this_file != NULL) {
+            file_seek (this_file, position);
+            lock_release(&fs_lock);
+        }
+        lock_release(&fs_lock);
+    }
 }
 
 /*
@@ -311,7 +322,19 @@ void sys_seek (int fd, unsigned position){
     open file fd, expressed in bytes from the beginning of the file.
 */
 unsigned sys_tell (int fd){
-
+    if (fd > 1) {
+        check_fs_lock();
+        lock_acquire(&fs_lock);
+        struct thread *t = thread_current();
+        struct file *this_file = t->file_descriptors[fd];
+        if(this_file != NULL) {
+            off_t position = file_tell (this_file);
+            lock_release(&fs_lock);
+            return position;
+        }
+        lock_release(&fs_lock);
+    }
+    return 0;
 }
     
 /*
