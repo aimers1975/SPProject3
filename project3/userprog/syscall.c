@@ -20,7 +20,7 @@ syscall syscall_tab[20]; // for all syscalls possible
 uint32_t syscall_nArgs[20];
 
 
-
+// Filesystem lock
 struct lock fs_lock;
 bool fs_lock_initialized = false;
 
@@ -28,7 +28,8 @@ typedef uint32_t pid_t;
 
 static int get_user (const uint8_t *uaddr);
 static bool put_user (uint8_t *udst, uint8_t byte);
-void check_ptr(const char *file);
+void check_ptr_get(const char *file);
+void check_ptr_put(const char *file);
 
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
@@ -140,7 +141,7 @@ bool sys_create (const char *file, unsigned initial_size){
 
     bool result = false;
     if(file != NULL) {
-        check_ptr(file);
+        check_ptr_get(file);
         check_fs_lock();
         lock_acquire(&fs_lock);
         result = filesys_create (file, initial_size);
@@ -151,12 +152,25 @@ bool sys_create (const char *file, unsigned initial_size){
     return result;
 }
 
-void check_ptr(const char *file) {
+void check_ptr_get(const char *file) {
     if(file < PHYS_BASE) {
         int ret = get_user(file);
         if(ret < 0) {
             sys_exit(-1);
         }
+    } else {
+        sys_exit(-1);
+    }
+}
+
+void check_ptr_put(const char *file) {
+    if(file < PHYS_BASE) {
+        int ret = put_user(file,'a');
+        if(ret < 0) {
+            sys_exit(-1);
+        }
+    } else {
+        sys_exit(-1);
     }
 }
 /*
@@ -168,7 +182,7 @@ void check_ptr(const char *file) {
 bool sys_remove (const char *file){
     bool result = false;
     if(file != NULL) {
-        check_ptr(file);
+        check_ptr_get(file);
         check_fs_lock();
         lock_acquire(&fs_lock);
         result = filesys_remove (file);
@@ -201,7 +215,7 @@ bool sys_remove (const char *file){
 int sys_open (const char *file){
     int result = -1;
     if(file != NULL) {
-        check_ptr(file);
+        check_ptr_get(file);
         check_fs_lock();
         lock_acquire(&fs_lock);    
         struct file * testfile1 = filesys_open (file);
@@ -241,28 +255,36 @@ int sys_filesize (int fd){
     Reads size bytes from the file open as fd into buffer. Returns the number of bytes actually read (0 at end of file), or -1 if the file could not be read (due to a condition other than end of file). Fd 0 reads from the keyboard using input_getc(). 
 */
 int sys_read (int fd, void *buffer, unsigned size){
-    check_ptr(buffer);
-    if (fd ==0){
-        int i;
-        for(i=0; i<size; i++) {
-            *(char*)buffer = input_getc();
-            buffer++;
+    if(size != 0 ) {
+        if(buffer != NULL) {
+            check_ptr_put(buffer);
+        } else {
+            sys_exit(-1);
         }
-        return size;
-    } else if (fd > 1) {
-        check_fs_lock();
-        lock_acquire(&fs_lock);
-        struct thread *t = thread_current();
-        struct file *this_file = t->file_descriptors[fd];
-        if(this_file != NULL) {
+        if (fd ==0){
+            int i;
+            for(i=0; i<size; i++) {
+                *(char*)buffer = input_getc();
+                buffer++;
+            }
+            return size;
+        } else if (fd > 1) {
+            check_fs_lock();
+            lock_acquire(&fs_lock);
+            struct thread *t = thread_current();
+            struct file *this_file = t->file_descriptors[fd];
+            if(this_file != NULL) {
 
-            off_t bytes_read = file_read (this_file, buffer, size);
+                off_t bytes_read = file_read (this_file, buffer, size);
+                lock_release(&fs_lock);
+                return bytes_read;
+            }
             lock_release(&fs_lock);
-            return bytes_read;
         }
-        lock_release(&fs_lock);
+        return -1;
+    } else {
+        return 0;
     }
-    return -1;
 
 }
 
@@ -285,7 +307,11 @@ int sys_read (int fd, void *buffer, unsigned size){
     console, confusing both human readers and our grading scripts.
 */
 int sys_write (int fd, const void *buffer, unsigned size){
-
+    if(buffer != NULL) {
+        check_ptr_get(buffer);
+    } else {
+        sys_exit(-1);
+    }
     if (fd ==1){
 	    putbuf(buffer,size);
         return size;
