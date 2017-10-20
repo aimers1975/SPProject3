@@ -8,7 +8,7 @@
 #include "threads/init.h"
 #include "threads/vaddr.h"
 
-#define MAX_FD 20;
+#define MAX_ALL_FD 1000
 
 static void syscall_handler (struct intr_frame *);
 void check_fs_lock();
@@ -18,6 +18,12 @@ typedef uint32_t (*syscall)(uint32_t, uint32_t, uint32_t);
    takes three uint32_t's and returns a unit32_t */
 syscall syscall_tab[20]; // for all syscalls possible
 uint32_t syscall_nArgs[20];
+// TODO: sync file accesses are failing, think we need to
+// globally keep track of all file descriptors so we don't close
+// a file when other threads are still possibly going to write it?
+// 
+struct file * all_file_descriptors[500];
+int curr_file_descriptor;
 
 
 // Filesystem lock
@@ -85,8 +91,15 @@ void sys_exit (int status){
  */
 
 pid_t sys_exec (const char *cmd_line){
-    if(cmd_line != NULL)
-        check_ptr_get(cmd_line);
+    if(cmd_line < PHYS_BASE) {
+        int ret = get_user(cmd_line);
+        if(ret < 0) {
+            sys_exit(-1);
+        }
+    } else {
+        sys_exit(-1);
+    }
+    // AMY/CARMINA TODO: Need to add sychronization for thread struct and create thread
 
 }
 
@@ -401,6 +414,15 @@ void sys_close (int fd){
     struct thread *t = thread_current();
     if(fd > 1) {
         struct file* close_file = t->file_descriptors[fd];
+        //TODO: sycnronous file access tests are failing
+        // this may be because we are not keeping track and 
+        // checking if other threads have the file pointer
+        // added a global list of open file descriptors so 
+        // we need to check that list to make sure nobody else
+        // has the file pointer, and only NULL out the file
+        // descriptor table for the current thread if other
+        // threads have it open
+        check_file_still_open(int fd);
         if(close_file != NULL) {  
             file_close (close_file);
             t->file_descriptors[fd] = NULL;
@@ -409,7 +431,7 @@ void sys_close (int fd){
     lock_release(&fs_lock);
 
 }
-
+    
 void check_fs_lock() {
    if(!fs_lock_initialized) {
        //fs_lock = malloc(sizeof(struct lock*));
@@ -418,6 +440,11 @@ void check_fs_lock() {
    }
 }
 
+bool check_file_still_open(int fd) {
+    //TODO:  check to see if the pointer to which fd refereces
+    //  is open in any other processes, if we find it again in the globaal
+    // file descriptor table we'll need to return true
+}
  	
 
 /* Reads a byte at user virtual address UADDR. UADDR must be below PHYS_BASE. Returns the byte value if successful, -1 if a segfault
@@ -451,6 +478,10 @@ void
 syscall_init (void) 
 {
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
+  for(int i = 0; i < MAX_ALL_FD; i++){
+    all_file_descriptors[i] = NULL;
+  }
+  curr_file_descriptor = 2;
 
   //  SYS_HALT,                   /* Halt the operating system. */
   syscall_tab[SYS_HALT] = (syscall)&sys_halt;
