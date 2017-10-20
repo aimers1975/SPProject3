@@ -8,28 +8,16 @@
 #include "threads/init.h"
 #include "threads/vaddr.h"
 
-#define MAX_ALL_FD 1000
-
 static void syscall_handler (struct intr_frame *);
-void check_fs_lock();
-bool check_file_still_open(int fd);
 
 typedef uint32_t (*syscall)(uint32_t, uint32_t, uint32_t);
 /* syscal is typedef'ed to a function pointers that
    takes three uint32_t's and returns a unit32_t */
 syscall syscall_tab[20]; // for all syscalls possible
 uint32_t syscall_nArgs[20];
-// TODO: sync file accesses are failing, think we need to
-// globally keep track of all file descriptors so we don't close
-// a file when other threads are still possibly going to write it?
-// 
-struct file * all_file_descriptors[500];
-int curr_file_descriptor;
-
 
 // Filesystem lock
 struct lock fs_lock;
-bool fs_lock_initialized = false;
 
 typedef uint32_t pid_t; 
 
@@ -45,7 +33,6 @@ syscall_handler (struct intr_frame *f UNUSED)
     //thread_exit ();
     uint32_t callno, args[3], *usp = f->esp;
     
-
     callno = (uint32_t)(*usp);
     if(usp != NULL)
         check_ptr_get(usp);
@@ -166,7 +153,6 @@ bool sys_create (const char *file, unsigned initial_size){
     bool result = false;
     if(file != NULL) {
         check_ptr_get(file);
-        check_fs_lock();
         lock_acquire(&fs_lock);
         result = filesys_create (file, initial_size);
         lock_release(&fs_lock);
@@ -189,7 +175,8 @@ void check_ptr_get(const char *file) {
 
 void check_ptr_put(const char *file) {
     if(file < PHYS_BASE) {
-        int ret = put_user(file,'a');
+        char gotchar = get_user(file);
+        int ret = put_user(file,gotchar);
         if(ret < 0) {
             sys_exit(-1);
         }
@@ -207,7 +194,6 @@ bool sys_remove (const char *file){
     bool result = false;
     if(file != NULL) {
         check_ptr_get(file);
-        check_fs_lock();
         lock_acquire(&fs_lock);
         result = filesys_remove (file);
         lock_release(&fs_lock);
@@ -240,7 +226,6 @@ int sys_open (const char *file){
     int result = -1;
     if(file != NULL) {
         check_ptr_get(file);
-        check_fs_lock();
         lock_acquire(&fs_lock);    
         struct file * testfile1 = filesys_open (file);
         struct thread *t = thread_current();
@@ -264,7 +249,6 @@ int sys_open (const char *file){
 int sys_filesize (int fd){
     int result = 0;
     if(fd > 1) {
-        check_fs_lock();
         lock_acquire(&fs_lock);
         struct thread *t = thread_current();
         struct file *this_file = t->file_descriptors[fd];
@@ -293,7 +277,6 @@ int sys_read (int fd, void *buffer, unsigned size){
             }
             return size;
         } else if (fd > 1) {
-            check_fs_lock();
             lock_acquire(&fs_lock);
             struct thread *t = thread_current();
             struct file *this_file = t->file_descriptors[fd];
@@ -340,7 +323,6 @@ int sys_write (int fd, const void *buffer, unsigned size){
 	    putbuf(buffer,size);
         return size;
     } else if (fd > 1) {
-        check_fs_lock();
         lock_acquire(&fs_lock);
         struct thread *t = thread_current();
         struct file *this_file = t->file_descriptors[fd];
@@ -371,7 +353,6 @@ int sys_write (int fd, const void *buffer, unsigned size){
 void sys_seek (int fd, unsigned position){
 
     if (fd > 1) {
-        check_fs_lock();
         lock_acquire(&fs_lock);
         struct thread *t = thread_current();
         struct file *this_file = t->file_descriptors[fd];
@@ -389,7 +370,6 @@ void sys_seek (int fd, unsigned position){
 */
 unsigned sys_tell (int fd){
     if (fd > 1) {
-        check_fs_lock();
         lock_acquire(&fs_lock);
         struct thread *t = thread_current();
         struct file *this_file = t->file_descriptors[fd];
@@ -410,20 +390,10 @@ unsigned sys_tell (int fd){
 */
 void sys_close (int fd){
 
-    check_fs_lock();
     lock_acquire(&fs_lock);
     struct thread *t = thread_current();
     if(fd > 1) {
         struct file* close_file = t->file_descriptors[fd];
-        //TODO: sycnronous file access tests are failing
-        // this may be because we are not keeping track and 
-        // checking if other threads have the file pointer
-        // added a global list of open file descriptors so 
-        // we need to check that list to make sure nobody else
-        // has the file pointer, and only NULL out the file
-        // descriptor table for the current thread if other
-        // threads have it open
-        check_file_still_open(fd);
         if(close_file != NULL) {  
             file_close (close_file);
             t->file_descriptors[fd] = NULL;
@@ -431,23 +401,7 @@ void sys_close (int fd){
     }
     lock_release(&fs_lock);
 
-}
-    
-void check_fs_lock() {
-   if(!fs_lock_initialized) {
-       //fs_lock = malloc(sizeof(struct lock*));
-       lock_init(&fs_lock);
-       fs_lock_initialized = true;
-   }
-}
-
-bool check_file_still_open(int fd) {
-    //TODO:  check to see if the pointer to which fd refereces
-    //  is open in any other processes, if we find it again in the globaal
-    // file descriptor table we'll need to return true
-    return false;
-}
- 	
+}	
 
 /* Reads a byte at user virtual address UADDR. UADDR must be below PHYS_BASE. Returns the byte value if successful, -1 if a segfault
    occurred. This function assumes that the user address has already been verified to be below PHYS_BASE and assumes 
@@ -480,10 +434,7 @@ void
 syscall_init (void) 
 {
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
-  for(int i = 0; i < MAX_ALL_FD; i++){
-    all_file_descriptors[i] = NULL;
-  }
-  curr_file_descriptor = 2;
+  lock_init(&fs_lock);
 
   //  SYS_HALT,                   /* Halt the operating system. */
   syscall_tab[SYS_HALT] = (syscall)&sys_halt;
