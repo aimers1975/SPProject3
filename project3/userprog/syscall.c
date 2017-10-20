@@ -64,6 +64,13 @@ void sys_halt (void){
 void sys_exit (int status){
 
     printf("%s: exit(%d)\n",thread_name(),status);
+    struct thread *t = thread_current();
+    int num_fd = t->curr_file_descriptor;
+    for(int i =2; i<num_fd; i++) {
+        if(t->file_descriptors[i] != NULL) {
+            sys_close(t->file_descriptors[i]);
+        }
+    }
     thread_exit();
 
 }
@@ -87,6 +94,7 @@ pid_t sys_exec (const char *cmd_line){
     } else {
         sys_exit(-1);
     }
+    printf("NOT IMPLEMENTED!!!");
     // AMY/CARMINA TODO: Need to add sychronization for thread struct and create thread
 
 }
@@ -110,7 +118,7 @@ pid_t sys_exec (const char *cmd_line){
         pid does not refer to a direct child of the calling
         process. pid is a direct child of the calling process if and
         only if the calling process received pid as a return value
-        from a successful call to exec.
+        from a successful call to exec
 
         Note that children are not inherited: if A spawns child B and
         B spawns child process C, then A cannot wait for C, even if B
@@ -358,7 +366,6 @@ void sys_seek (int fd, unsigned position){
         struct file *this_file = t->file_descriptors[fd];
         if(this_file != NULL) {
             file_seek (this_file, position);
-            lock_release(&fs_lock);
         }
         lock_release(&fs_lock);
     }

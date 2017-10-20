@@ -88,9 +88,9 @@ kill (struct intr_frame *f)
          expected.  Kill the user process.  */
       //printf ("%s: dying due to interrupt %#04x (%s).\n",
       //        thread_name (), f->vec_no, intr_name (f->vec_no));
-      intr_dump_frame (f);
-      thread_exit (); 
-
+      //intr_dump_frame (f);
+      //thread_exit (); 
+      sys_exit(-1);
     case SEL_KCSEG:
       /* Kernel's code segment, which indicates a kernel bug.
          Kernel code shouldn't throw exceptions.  (Page faults
