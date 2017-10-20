@@ -12,6 +12,7 @@
 
 static void syscall_handler (struct intr_frame *);
 void check_fs_lock();
+bool check_file_still_open(int fd);
 
 typedef uint32_t (*syscall)(uint32_t, uint32_t, uint32_t);
 /* syscal is typedef'ed to a function pointers that
@@ -422,7 +423,7 @@ void sys_close (int fd){
         // has the file pointer, and only NULL out the file
         // descriptor table for the current thread if other
         // threads have it open
-        check_file_still_open(int fd);
+        check_file_still_open(fd);
         if(close_file != NULL) {  
             file_close (close_file);
             t->file_descriptors[fd] = NULL;
@@ -444,6 +445,7 @@ bool check_file_still_open(int fd) {
     //TODO:  check to see if the pointer to which fd refereces
     //  is open in any other processes, if we find it again in the globaal
     // file descriptor table we'll need to return true
+    return false;
 }
  	
 
