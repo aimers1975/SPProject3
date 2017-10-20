@@ -40,9 +40,17 @@ syscall_handler (struct intr_frame *f UNUSED)
     
 
     callno = (uint32_t)(*usp);
+    if(usp != NULL)
+        check_ptr_get(usp);
     args[0] = (uint32_t)(*(usp+1));
+    if((usp+1) != NULL)
+        check_ptr_get(usp+1);
     args[1] = (uint32_t)(*(usp+2));
+    if((usp+1) != NULL)
+        check_ptr_get(usp+2);
     args[2] = (uint32_t)(*(usp+3));
+    if((usp+1) != NULL)
+        check_ptr_get(usp+3);
     f->eax = syscall_tab[callno](args[0],args[1],args[2]);
 }
 
@@ -77,6 +85,8 @@ void sys_exit (int status){
  */
 
 pid_t sys_exec (const char *cmd_line){
+    if(cmd_line != NULL)
+        check_ptr_get(cmd_line);
 
 }
 
