@@ -15,8 +15,10 @@
 #include "threads/init.h"
 #include "threads/interrupt.h"
 #include "threads/palloc.h"
+#include "threads/synch.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "userprog/syscall.h"
 
 // Each argv has a null-terminated string of characters
 typedef struct{
@@ -44,6 +46,14 @@ process_execute (const char *cmd_string)
   tid_t tid;
   int i;
   child_t child;
+  struct child_process *cp;
+  struct thread *t;
+     
+  cp = (struct child_process *)malloc(sizeof(struct child_process));
+  if (cp == NULL)
+     return TID_ERROR;
+  cp->file_name = NULL;
+  sema_init(&cp->sema, 0);
 
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
@@ -61,12 +71,26 @@ process_execute (const char *cmd_string)
       child.args[i].len = strlen(token);
   }
   child.argc = i;
- 
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (child.args[0].name, PRI_DEFAULT, start_process, &child);
-  if (tid == TID_ERROR)
+  if (tid == TID_ERROR) {
+    free(cp);
     palloc_free_page (cmd_copy); 
+  }
+  else {
+     cp->pid = tid;
+     cp->exit_code = 0;
+     cp->exit = false;
+     cp->wait = false;
+     t = find_thread_by_pid(tid);
+     cp->process = t;
+     cp->file_name = cmd_copy;
+     list_push_back(&thread_current()->child_list, &cp->elem);
+
+    sema_up(&t->sema);
+    sema_down(&cp->sema);
+  }
   return tid;
 }
 
@@ -78,7 +102,12 @@ start_process (void *childptr)
   child_t *child = (child_t *)childptr;
   struct intr_frame if_;
   bool success;
-
+  
+  struct thread *t_cur = thread_current();
+  struct thread *t;
+  struct child_process *cp;
+  struct list_elem *temp;
+  
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
@@ -87,10 +116,27 @@ start_process (void *childptr)
   // Load executable into memory
   success = load (child->args[0].name, &if_.eip, &if_.esp);
 
+  if (success) {
+     t_cur->loaded = 1;   
+  }
+  else {
+     t_cur->loaded = -1; 
+  }
+  sema_down(&t_cur->sema);
+  t = find_thread_by_pid(t_cur->parent_pid);
+  temp = list_begin(&t->child_list);
+  while (temp != list_end(&t_cur->child_list)) {
+     cp = list_entry(temp, struct child_process, elem);
+     if (cp->pid == t_cur->tid)
+        break;
+     temp = temp->next;
+  }
+  sema_up(&cp->sema);
+
   /* If load failed, quit. */
   //  palloc_free_page (file_name);
   if (!success) 
-    thread_exit ();
+    sys_exit (-1);
 
   /* Set up stack. to put args on stack
      args in the child structure */
@@ -117,12 +163,44 @@ start_process (void *childptr)
 
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
-volatile int child_done = 0;
+//volatile int child_done = 0;
 int
 process_wait (tid_t child_tid UNUSED) 
 {
-    while(!child_done){}
-    return -1;
+    int status;
+    struct thread *t = thread_current();
+    struct list_elem *temp;
+    struct child_process *cp;
+    bool exist = false;
+
+    temp = list_begin(&t->child_list);
+    while(temp != list_end(&t->child_list)) {
+       cp = list_entry(temp, struct child_process, elem);
+       if (cp->pid == child_tid) {
+          exist = true;
+          break;
+       }
+       temp = temp->next;
+    }
+
+    if (exist == false)
+       return -1;
+    if (cp->wait == true)
+       return -1;
+
+    cp->wait = true;
+    /* busy waiting */
+    while (cp->exit == false)
+       thread_yield();
+
+    /* remove zombie process */
+    list_remove(&cp->elem);
+    status = cp->exit_code;
+    if (cp->file_name != NULL)
+        palloc_free_page(cp->file_name);
+    free(cp);
+//    while(!child_done){}
+    return status;
 }
 
 /* Free the current process's resources. */
@@ -132,7 +210,7 @@ process_exit (void)
   struct thread *cur = thread_current ();
   uint32_t *pd;
 
-  child_done = 1;
+//  child_done = 1;
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;
@@ -336,7 +414,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
     }
 
   /* Set up stack.
-  if (!setup_stack (esp))
+  if (!setup_stack (esp) )
     goto done; */
 
   /* Start address. */

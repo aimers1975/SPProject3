@@ -7,6 +7,8 @@
 #include "threads/synch.h"
 #include "threads/init.h"
 #include "threads/vaddr.h"
+#include "lib/kernel/list.h"
+#include "filesys/file.h" 
 
 static void syscall_handler (struct intr_frame *);
 
@@ -17,7 +19,8 @@ syscall syscall_tab[20]; // for all syscalls possible
 uint32_t syscall_nArgs[20];
 
 // Filesystem lock
-struct lock fs_lock;
+extern struct lock fs_lock;
+extern struct semaphore exec_sema;
 
 typedef uint32_t pid_t; 
 
@@ -63,14 +66,52 @@ void sys_halt (void){
  */
 void sys_exit (int status){
 
-    printf("%s: exit(%d)\n",thread_name(),status);
+    //printf("%s: exit(%d)\n",thread_name(),status);
     struct thread *t = thread_current();
-    int num_fd = t->curr_file_descriptor;
-    for(int i =2; i<num_fd; i++) {
-        if(t->file_descriptors[i] != NULL) {
-            sys_close(t->file_descriptors[i]);
-        }
+    struct thread *parent;
+    struct list_elem *temp;
+    struct child_process *cp;
+    struct opened_file *of;
+ //   int num_fd = t->curr_file_descriptor;
+    if (fs_lock.holder == t) 
+       lock_release(&fs_lock);
+   
+    // remove file list
+//    for(int i =2; i<num_fd; i++) {
+//        if(t->file_descriptors[i] != NULL) {
+//            sys_close(t->file_descriptors[i]);
+//        }
+//    }
+    
+    temp = list_begin(&t->file_list);
+    while (temp != list_end(&t->file_list)) {
+       of = list_entry(temp, struct opened_file, elem);
+       temp = temp->next;
+       sys_close(of->fd);
     }
+
+    //wait child process before exiting
+    temp = list_begin(&t->child_list);
+    while (temp != list_end(&t->child_list)) {
+        cp = list_entry(temp, struct child_process, elem);
+        temp = temp->next;
+        sys_wait(cp->pid);
+    }
+    // Alert that child exited
+    parent = find_thread_by_pid(t->parent_pid);
+    if (parent != NULL) {
+       temp = list_begin(&parent->child_list);
+       while (temp != list_end(&parent->child_list)) {
+           cp = list_entry(temp, struct child_process, elem);
+           if (cp->process == t) {
+              cp->exit_code = status;
+              cp->exit = true;
+              break;   
+           }
+           temp = temp->next;
+       }
+    }
+    printf("%s: exit(%d)\n",thread_name(),status);
     thread_exit();
 
 }
@@ -86,6 +127,12 @@ void sys_exit (int status){
  */
 
 pid_t sys_exec (const char *cmd_line){
+
+    struct child_process *cp;
+    struct thread *executed;
+    pid_t pid;
+    
+
     if(cmd_line < PHYS_BASE) {
         int ret = get_user(cmd_line);
         if(ret < 0) {
@@ -94,7 +141,39 @@ pid_t sys_exec (const char *cmd_line){
     } else {
         sys_exit(-1);
     }
-    printf("NOT IMPLEMENTED!!!");
+
+    lock_acquire(&fs_lock);
+    pid = process_execute(cmd_line);
+    if (pid == TID_ERROR) {
+       lock_release(&fs_lock);
+       return -1; 
+    }
+    cp = get_child_process(pid);
+    if (cp == NULL) {
+       lock_release(&fs_lock);
+    //   ASSERT(cp);
+    }
+    executed = cp->process;
+
+/*  sema synchronized in process_execute 
+    but implemented busy_wait before so it exists
+ */
+    while (executed->loaded == 0) {
+       thread_yield();
+    }
+    if (executed->loaded == -1) {
+       sys_wait(pid);
+       lock_release(&fs_lock);
+       return -1;
+    }
+    else if (executed->loaded == 1) {
+        lock_release(&fs_lock);
+        return pid;
+    }
+    sys_wait(pid);
+    lock_release(&fs_lock);
+    return -1;
+//    printf("NOT IMPLEMENTED!!!");
     // AMY/CARMINA TODO: Need to add sychronization for thread struct and create thread
 
 }
@@ -149,6 +228,8 @@ pid_t sys_exec (const char *cmd_line){
     any of the rest.
 */
 int sys_wait (pid_t pid){
+
+   return process_wait(pid);
 }
 
 /*    Creates a new file called file initially initial_size bytes in
@@ -232,31 +313,67 @@ bool sys_remove (const char *file){
     */
 int sys_open (const char *file){
     int result = -1;
-    if(file != NULL) {
-        check_ptr_get(file);
-        lock_acquire(&fs_lock);    
-        struct file * testfile1 = filesys_open (file);
-        struct thread *t = thread_current();
-        if(testfile1 != NULL) {
-            int currfd = t->curr_file_descriptor;
-            t->file_descriptors[t->curr_file_descriptor] = testfile1;
-            t->curr_file_descriptor++;
-            lock_release(&fs_lock);
-            return currfd;
-        } else {
-            lock_release(&fs_lock);
-            return -1;
-        }
-    } else {
-        sys_exit(-1);
+    bool release = true;
+    struct thread *t = thread_current();
+    struct file *testfile1;
+    struct opened_file *of;
+
+    if(file == NULL) 
+       sys_exit(-1);
+   // if(fs_lock.holder != t)
+       check_ptr_get(file);
+        
+    if(fs_lock.holder != t) { 
+       lock_acquire(&fs_lock);
     }
+    else
+       release = false;    
+
+    testfile1 = filesys_open (file);
+    if (testfile1 == NULL)
+    {
+       lock_release(&fs_lock);
+       return -1;
+    }
+    of = (struct opened_file *)malloc(sizeof(struct opened_file));
+    if (of == NULL) {
+       file_close(testfile1);
+       lock_release(&fs_lock); 
+       return -1; 
+    }
+    of->fd = t->fd_count++;
+    result = of->fd;
+    of->file = testfile1;
+    list_push_back(&t->file_list, &of->elem);
+
+ //   if (check_all_process(file))
+ //      file_deny_write(testfile1);
+
+    if (release)
+       lock_release(&fs_lock);
+    else
+       file_deny_write(testfile1);
+
+    return result; 
 }
 
 /*    Returns the size, in bytes, of the file open as fd. 
  */
 int sys_filesize (int fd){
     int result = 0;
-    if(fd > 1) {
+    struct opened_file *f;
+    struct file *this_file;
+    
+    f = get_opened_file(fd);
+    if (f == NULL)
+       return -1;
+    this_file = f->file;
+    lock_acquire(&fs_lock);
+    result = file_length (this_file);
+    lock_release(&fs_lock);           
+    
+    
+   /* if(fd > 1) {
         lock_acquire(&fs_lock);
         struct thread *t = thread_current();
         struct file *this_file = t->file_descriptors[fd];
@@ -264,42 +381,51 @@ int sys_filesize (int fd){
             result = file_length (this_file);
         }
         lock_release(&fs_lock);           
-    } 
+    }
+   */ 
     return result;
 }
 /*
     Reads size bytes from the file open as fd into buffer. Returns the number of bytes actually read (0 at end of file), or -1 if the file could not be read (due to a condition other than end of file). Fd 0 reads from the keyboard using input_getc(). 
 */
 int sys_read (int fd, void *buffer, unsigned size){
-    if(size != 0 ) {
-        if(buffer != NULL) {
-            check_ptr_put(buffer);
-        } else {
-            sys_exit(-1);
-        }
-        if (fd ==0){
+    struct opened_file *f;
+    struct file *this_file;
             int i;
-            for(i=0; i<size; i++) {
-                *(char*)buffer = input_getc();
-                buffer++;
-            }
-            return size;
-        } else if (fd > 1) {
+     unsigned int bytes_read; 
+  //  if(size != 0 ) {
+ //       if(buffer != NULL) {
+            check_ptr_put(buffer);
+ //       } else {
+ //           sys_exit(-1);
+//        }
             lock_acquire(&fs_lock);
-            struct thread *t = thread_current();
-            struct file *this_file = t->file_descriptors[fd];
-            if(this_file != NULL) {
-
-                off_t bytes_read = file_read (this_file, buffer, size);
-                lock_release(&fs_lock);
-                return bytes_read;
+        if (fd ==0){
+//            int i;
+            for(i=0; i<size; i++) 
+                *(char*)(buffer + i) = input_getc();
+             //   buffer++;
+               
+             bytes_read = size;
+        } else {
+       //     lock_acquire(&fs_lock);
+        //    struct thread *t = thread_current();
+            f = get_opened_file(fd);
+            if (f == NULL) {
+               lock_release(&fs_lock);
+               return -1;  
             }
+            this_file = f->file;
+
+             bytes_read = file_read (this_file, buffer, size);
+          }
             lock_release(&fs_lock);
-        }
-        return -1;
-    } else {
-        return 0;
-    }
+            return bytes_read;
+        
+//        return -1;
+//    } else {
+//        return 0;
+//    }
 
 }
 
@@ -322,26 +448,33 @@ int sys_read (int fd, void *buffer, unsigned size){
     console, confusing both human readers and our grading scripts.
 */
 int sys_write (int fd, const void *buffer, unsigned size){
+    struct opened_file *f;
+    struct file *this_file;
+    struct list_elem *temp;
+    unsigned int bytes_written;
+
     if(buffer != NULL) {
         check_ptr_get(buffer);
     } else {
         sys_exit(-1);
     }
+    lock_acquire(&fs_lock);
     if (fd ==1){
-	    putbuf(buffer,size);
-        return size;
-    } else if (fd > 1) {
-        lock_acquire(&fs_lock);
-        struct thread *t = thread_current();
-        struct file *this_file = t->file_descriptors[fd];
-        if(this_file != NULL) {
-            off_t bytes_written = file_write (this_file, buffer, size);
-            lock_release(&fs_lock);
-            return bytes_written;
+	putbuf(buffer,size);
+        bytes_written = size;
+    } else {
+    //    lock_acquire(&fs_lock);
+    //    struct thread *t = thread_current();
+        f = get_opened_file(fd);
+        if (f == NULL) {
+           lock_release(&fs_lock);
+           return -1;
         }
+        this_file = f->file;
+        bytes_written = file_write (this_file, buffer, size);
+      }
         lock_release(&fs_lock);
-    }
-    return 0;
+        return bytes_written;
 }
 
 
@@ -359,16 +492,16 @@ int sys_write (int fd, const void *buffer, unsigned size){
 */
 
 void sys_seek (int fd, unsigned position){
-
-    if (fd > 1) {
-        lock_acquire(&fs_lock);
-        struct thread *t = thread_current();
-        struct file *this_file = t->file_descriptors[fd];
-        if(this_file != NULL) {
-            file_seek (this_file, position);
-        }
-        lock_release(&fs_lock);
-    }
+    struct opened_file *f;
+    struct file *this_file;
+    f = get_opened_file(fd);
+    if (f == NULL) 
+       return;
+    
+    this_file = f->file;
+    lock_acquire(&fs_lock);
+    file_seek (this_file, position);
+    lock_release(&fs_lock);
 }
 
 /*
@@ -376,18 +509,18 @@ void sys_seek (int fd, unsigned position){
     open file fd, expressed in bytes from the beginning of the file.
 */
 unsigned sys_tell (int fd){
-    if (fd > 1) {
-        lock_acquire(&fs_lock);
-        struct thread *t = thread_current();
-        struct file *this_file = t->file_descriptors[fd];
-        if(this_file != NULL) {
-            off_t position = file_tell (this_file);
-            lock_release(&fs_lock);
-            return position;
-        }
-        lock_release(&fs_lock);
-    }
-    return 0;
+    struct opened_file *f;
+    struct file *this_file;
+    
+    f = get_opened_file(fd);
+    if (f == NULL)
+       return -1;
+    this_file = f->file;
+    
+    lock_acquire(&fs_lock);
+    off_t position = file_tell (this_file);
+    lock_release(&fs_lock);
+    return position;
 }
     
 /*
@@ -396,20 +529,53 @@ unsigned sys_tell (int fd){
     this function for each one.
 */
 void sys_close (int fd){
+    struct opened_file *f;
+    struct file *close_file;
+
+    f = get_opened_file(fd);
+    if (f == NULL)
+       return;
+    close_file = f->file;
 
     lock_acquire(&fs_lock);
-    struct thread *t = thread_current();
-    if(fd > 1) {
-        struct file* close_file = t->file_descriptors[fd];
-        if(close_file != NULL) {  
-            file_close (close_file);
-            t->file_descriptors[fd] = NULL;
-        }
-    }
+    file_allow_write(close_file); 
+    file_close (close_file);
+    free(f);
     lock_release(&fs_lock);
 
 }	
 
+/* get the child process for wait/exec */
+struct child_process* get_child_process(pid_t pid) {
+   struct thread *t = thread_current();
+   struct child_process *cp;
+   struct list_elem *temp;
+   
+   temp = list_begin(&t->child_list);
+   while (temp != list_end(&t->child_list)) {
+       cp = list_entry(temp, struct child_process, elem);
+       if (cp->pid == pid)
+          return cp;
+       temp = temp->next;
+   }
+   return NULL;
+}
+
+struct opened_file* get_opened_file(int fd) {
+   struct thread *t = thread_current();
+   struct opened_file *f;
+   struct list_elem *temp;
+  
+   temp = list_begin(&t->file_list);
+   while (temp != list_end(&t->file_list)) {
+      f = list_entry(temp, struct opened_file, elem);
+      if (f->fd == fd)
+         return f;
+      temp = temp->next;
+   }
+   return NULL;
+
+}
 /* Reads a byte at user virtual address UADDR. UADDR must be below PHYS_BASE. Returns the byte value if successful, -1 if a segfault
    occurred. This function assumes that the user address has already been verified to be below PHYS_BASE and assumes 
    that you've modified page_fault() so that a page fault in the kernel merely sets eax to 0xffffffff and copies its

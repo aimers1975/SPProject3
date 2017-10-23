@@ -13,12 +13,16 @@
 #include "threads/vaddr.h"
 #ifdef USERPROG
 #include "userprog/process.h"
+#include "userprog/syscall.h"
 #endif
 
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
    of thread.h for details. */
 #define THREAD_MAGIC 0xcd6abf4b
+
+struct lock fs_lock;
+struct semaphore exec_sema;
 
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
@@ -88,10 +92,12 @@ void
 thread_init (void) 
 {
   ASSERT (intr_get_level () == INTR_OFF);
-
+  
+  lock_init (&fs_lock);
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&all_list);
+  sema_init (&exec_sema, 0);
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
@@ -171,6 +177,7 @@ thread_create (const char *name, int priority,
   struct switch_entry_frame *ef;
   struct switch_threads_frame *sf;
   tid_t tid;
+  enum intr_level old_level;
 
   ASSERT (function != NULL);
 
@@ -182,6 +189,13 @@ thread_create (const char *name, int priority,
   /* Initialize thread. */
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
+
+#ifdef USERPROG
+  t->parent_pid = thread_current()->tid;
+#endif
+
+/* atomically prepare thread by initializing stack */
+  old_level = intr_disable();
 
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
@@ -197,7 +211,8 @@ thread_create (const char *name, int priority,
   sf = alloc_frame (t, sizeof *sf);
   sf->eip = switch_entry;
   sf->ebp = 0;
-
+  
+  intr_set_level (old_level);
   /* Add to run queue. */
   thread_unblock (t);
 
@@ -451,7 +466,7 @@ is_thread (struct thread *t)
 static void
 init_thread (struct thread *t, const char *name, int priority)
 {
-  enum intr_level old_level;
+//  enum intr_level old_level;
 
   ASSERT (t != NULL);
   ASSERT (PRI_MIN <= priority && priority <= PRI_MAX);
@@ -463,13 +478,21 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
-  t->curr_file_descriptor = 2;
-  for(int i =0; i < MAX_FD; i++) {
-     t->file_descriptors[i] = NULL;
-  }
-  old_level = intr_disable ();
+ // t->curr_file_descriptor = 2;
+//  for(int i =0; i < MAX_FD; i++) {
+//     t->file_descriptors[i] = NULL;
+//  }
+//  old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
-  intr_set_level (old_level);
+//  intr_set_level (old_level);
+
+#ifdef USERPROG
+  t->loaded = 0;
+  t->fd_count = 2;
+  list_init(&t->child_list);
+  list_init(&t->file_list);
+  sema_init(&t->sema,0);
+#endif
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
@@ -581,7 +604,42 @@ allocate_tid (void)
 
   return tid;
 }
-
+
+struct thread* find_thread_by_pid(tid_t tid) {
+   struct list_elem *temp;
+   struct thread *t;
+   
+   temp = list_begin(&all_list);
+   while (temp != list_end(&all_list)) {
+      t = list_entry(temp, struct thread, allelem);
+      if (t->tid == tid)
+         return t;
+      temp = temp->next;
+   }
+   return 0;
+
+}
+
+bool check_all_process(const char *file_name) {
+   struct list_elem *temp;
+   struct list_elem *temp2;
+   struct thread *t;
+   struct child_process *cp;
+
+   temp = list_begin(&all_list);
+   while (temp != list_end(&all_list)) {
+      t = list_entry(temp, struct thread, allelem);
+      temp2 = list_begin(&t->child_list);
+      while (temp2 != list_end(&t->child_list)) {
+          cp = list_entry(temp2, struct child_process, elem);
+          if (!strcmp(cp->file_name, file_name))
+              return true;
+          temp2 = temp2->next;
+      }
+      temp = temp->next;
+   }
+   return false;
+}
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);

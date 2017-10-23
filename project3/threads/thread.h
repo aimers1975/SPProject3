@@ -5,7 +5,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
-#include "filesys/file.h"
+#include "threads/synch.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -28,6 +28,22 @@ typedef int tid_t;
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
 
+struct child_process {
+   struct list_elem elem;
+   int pid;
+   int exit_code;
+   bool exit;
+   bool wait;
+   struct thread *process;
+   char *file_name;
+   struct semaphore sema;
+};
+
+struct opened_file {
+   struct list_elem elem;
+   int fd;
+   struct file* file;
+};
 /* A kernel thread or user process.
 
    Each thread structure is stored in its own 4 kB page.  The
@@ -99,13 +115,19 @@ struct thread
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
+    tid_t parent_pid;                   /* parent_pid */
+    int loaded;                          /* load check */
+    int fd_count;
+    struct list child_list;              /* child process list */
+    struct list file_list;              /*  file list */
+    struct semaphore sema;               /* multi purpose sema */
     uint32_t *pagedir;                  /* Page directory. */
 #endif
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
-    struct file * file_descriptors[MAX_FD];
-    int curr_file_descriptor;
+  //  struct file * file_descriptors[MAX_FD];
+  //  int curr_file_descriptor;
 
   };
 
@@ -144,5 +166,7 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+
+struct thread* find_thread_by_pid(pid_t);
 
 #endif /* threads/thread.h */
