@@ -41,55 +41,52 @@ static bool setup_stack (void **esp, child_t *child );
    thread id, or TID_ERROR if the thread cannot be created. */
 tid_t
 process_execute (const char *cmd_string) 
-{
-    char *cmd_copy, *saveptr, *token;
+{ 
+  char *cmd_copy, *saveptr, *token;
   tid_t tid;
   int i;
   child_t child;
   struct child_process *cp;
-  struct thread *t;
-     
+  struct thread *t; 
   cp = (struct child_process *)malloc(sizeof(struct child_process));
   if (cp == NULL)
      return TID_ERROR;
+  
   cp->file_name = NULL;
   sema_init(&cp->sema, 0);
-
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   cmd_copy = palloc_get_page (0);
   if (cmd_copy == NULL)
     return TID_ERROR;
   strlcpy (cmd_copy, cmd_string, PGSIZE);
-
   /* Parse cmd_string into args */
-  for(i=0; ;i++,cmd_string = NULL){
-      token = strtok_r(cmd_string, " ", &saveptr);
+  for(i=0; ;i++,cmd_copy = NULL){
+      token = strtok_r(cmd_copy, " ", &saveptr);
       child.args[i].name = token;
       if (token == NULL)
           break;
       child.args[i].len = strlen(token);
-  }
+  } 
   child.argc = i;
-
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (child.args[0].name, PRI_DEFAULT, start_process, &child);
   if (tid == TID_ERROR) {
     free(cp);
     palloc_free_page (cmd_copy); 
   }
-  else {
+  else { 
      cp->pid = tid;
      cp->exit_code = 0;
      cp->exit = false;
-     cp->wait = false;
+     cp->wait = false; 
      t = find_thread_by_pid(tid);
      cp->process = t;
-     cp->file_name = cmd_copy;
+     cp->file_name = cmd_copy; 
      list_push_back(&thread_current()->child_list, &cp->elem);
+     sema_up(&t->sema);
+     sema_down(&cp->sema);
 
-    sema_up(&t->sema);
-    sema_down(&cp->sema);
   }
   return tid;
 }
@@ -103,26 +100,36 @@ start_process (void *childptr)
   struct intr_frame if_;
   bool success;
   
+  #ifdef USERPROG
   struct thread *t_cur = thread_current();
   struct thread *t;
   struct child_process *cp;
   struct list_elem *temp;
-  
   /* Initialize interrupt frame and load executable. */
+  #endif
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   // Load executable into memory
   success = load (child->args[0].name, &if_.eip, &if_.esp);
-
+    // Are we trying to get the child thread?
+  
   if (success) {
-     t_cur->loaded = 1;   
+     #ifdef USERPROG
+     t_cur->loaded = 1; 
+     #endif  
   }
   else {
-     t_cur->loaded = -1; 
+
+     #ifdef USERPROG
+     t_cur->loaded = -1;
+     #endif
+     thread_exit(); 
   }
+  #ifdef USERPROG
   sema_down(&t_cur->sema);
+
   t = find_thread_by_pid(t_cur->parent_pid);
   temp = list_begin(&t->child_list);
   while (temp != list_end(&t_cur->child_list)) {
@@ -131,13 +138,13 @@ start_process (void *childptr)
         break;
      temp = temp->next;
   }
-  sema_up(&cp->sema);
-
+    sema_up(&cp->sema);
   /* If load failed, quit. */
   //  palloc_free_page (file_name);
-  if (!success) 
+  if (!success) {
     sys_exit (-1);
-
+  }
+  #endif
   /* Set up stack. to put args on stack
      args in the child structure */
   if (!setup_stack (&if_.esp, child))
@@ -150,6 +157,7 @@ start_process (void *childptr)
      arguments on the stack in the form of a `struct intr_frame',
      we just point the stack pointer (%esp) to our stack frame
      and jump to it. */
+
   asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
   NOT_REACHED ();
 }
@@ -199,7 +207,7 @@ process_wait (tid_t child_tid UNUSED)
     if (cp->file_name != NULL)
         palloc_free_page(cp->file_name);
     free(cp);
-//    while(!child_done){}
+    //while(!child_done){}
     return status;
 }
 
@@ -210,7 +218,7 @@ process_exit (void)
   struct thread *cur = thread_current ();
   uint32_t *pd;
 
-//  child_done = 1;
+  //child_done = 1;
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;
