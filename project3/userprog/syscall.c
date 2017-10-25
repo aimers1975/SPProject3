@@ -156,7 +156,8 @@ pid_t sys_exec (const char *cmd_line){
        thread_yield();
     }
     if (executed->loaded == -1) {
-       sys_wait(pid);
+       if(pid >0)
+           sys_wait(pid);
        lock_release(&fs_lock);
        return -1;
     }
@@ -164,9 +165,9 @@ pid_t sys_exec (const char *cmd_line){
         lock_release(&fs_lock);
         return pid;
     }
-    sys_wait(pid);
+    //sys_wait(pid);
     lock_release(&fs_lock);
-    return -1;
+    return pid;
 //    printf("NOT IMPLEMENTED!!!");
     // AMY/CARMINA TODO: Need to add sychronization for thread struct and create thread
 
