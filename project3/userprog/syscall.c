@@ -123,7 +123,6 @@ void sys_exit (int status){
 pid_t sys_exec (const char *cmd_line){
 
     struct child_process *cp;
-    struct thread *executed;
     pid_t pid;
     
 
@@ -145,9 +144,9 @@ pid_t sys_exec (const char *cmd_line){
     cp = get_child_process(pid);
     if (cp == NULL) {
        lock_release(&fs_lock);
-    //   ASSERT(cp);
+       ASSERT(cp);
     }
-    executed = cp->process;
+    struct thread * executed = cp->process;
 
 /*  sema synchronized in process_execute 
     but implemented busy_wait before so it exists
@@ -327,6 +326,9 @@ int sys_open (const char *file){
                     result = of->fd;
                     of->file = testfile1;            
                     list_push_back(&t->file_list, &of->elem);
+                    /* file deny if executing exists */
+                    if(check_all_process(file))
+                        file_deny_write(testfile1);
                     if(release)
                         lock_release(&fs_lock);
                     else
@@ -665,3 +667,4 @@ syscall_init (void)
   syscall_tab[SYS_CLOSE] = (syscall)&sys_close;
   syscall_nArgs[SYS_CLOSE] = 1;
 }
+
