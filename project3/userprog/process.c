@@ -86,7 +86,9 @@ process_execute (const char *cmd_string)
      list_push_back(&thread_current()->child_list, &cp->elem);
      sema_up(&t->sema);
      sema_down(&cp->sema);
-
+     if(cp->exit == true) 
+        if(cp->exit_code == -1)
+            tid = -1;
   }
   return tid;
 }
@@ -114,7 +116,14 @@ start_process (void *childptr)
   // Load executable into memory
   success = load (child->args[0].name, &if_.eip, &if_.esp);
     // Are we trying to get the child thread?
-  
+  t = find_thread_by_pid(t_cur->parent_pid);
+  temp = list_begin(&t->child_list);
+  while (temp != list_end(&t_cur->child_list)) {
+     cp = list_entry(temp, struct child_process, elem);
+     if (cp->pid == t_cur->tid)
+        break;
+     temp = temp->next;
+  }  
   if (success) {
      #ifdef USERPROG
      t_cur->loaded = 1; 
@@ -124,20 +133,16 @@ start_process (void *childptr)
 
      #ifdef USERPROG
      t_cur->loaded = -1;
+     sema_up(&cp->sema);
+     cp->exit = true;
+     cp->exit_code=-1;
      #endif
      thread_exit(); 
   }
   #ifdef USERPROG
   sema_down(&t_cur->sema);
 
-  t = find_thread_by_pid(t_cur->parent_pid);
-  temp = list_begin(&t->child_list);
-  while (temp != list_end(&t_cur->child_list)) {
-     cp = list_entry(temp, struct child_process, elem);
-     if (cp->pid == t_cur->tid)
-        break;
-     temp = temp->next;
-  }
+
     sema_up(&cp->sema);
   /* If load failed, quit. */
   //  palloc_free_page (file_name);
