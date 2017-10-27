@@ -82,7 +82,8 @@ process_execute (const char *cmd_string)
      cp->wait = false; 
      t = find_thread_by_pid(tid);
      cp->process = t;
-     cp->file_name = cmd_copy; 
+     cp->file_name = child.args[0].name;
+     //printf("Adding filename to child: %s\n", cp->file_name); 
      list_push_back(&thread_current()->child_list, &cp->elem);
      sema_up(&t->sema);
      sema_down(&cp->sema);

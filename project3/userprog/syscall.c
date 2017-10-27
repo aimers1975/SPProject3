@@ -321,6 +321,9 @@ int sys_open (const char *file){
                 release = false;
             }   
             struct file * testfile1 = filesys_open (file);
+            //printf("Checking all processes for file: %s\n", file);
+            if(check_all_process(file))
+                file_deny_write(testfile1);
             if(testfile1 != NULL) {
                 struct opened_file *of = (struct opened_file *)malloc(sizeof(struct opened_file));
                 if(of != NULL) {
