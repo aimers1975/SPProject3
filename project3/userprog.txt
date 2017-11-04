@@ -94,14 +94,62 @@ and used by the file system calls.
 ---- ALGORITHMS ----
 >> B3: Describe your code for reading and writing user data from the
 >> kernel.
+
+//TODO
+
 >> B4: Suppose a system call causes a full page (4,096 bytes) of data
 >> to be copied from user space into the kernel.  What is the least
 >> and the greatest possible number of inspections of the page table
 >> (e.g. calls to pagedir_get_page()) that might result?  What about
 >> for a system call that only copies 2 bytes of data?  Is there room
 >> for improvement in these numbers, and how much?
+
+For a full page of data:
+The least number is 1. If the first inspection(pagedir_get_page) get a page head
+back, which can be tell from the address, we don’t actually need to inspect any
+more, it can contain one page of data.
+
+The greatest number might be 4096 if it’s not contiguous, in that case we have
+to check every address to ensure a valid access. When it’s contiguous, the
+greatest number would be 2, if we get a kernel virtual address that is not a
+page head, we surely want to check the start pointer and the end pointer of the
+full page data, see if it’s mapped. 
+
+For 2 bytes of data:
+The least number will be 1. Like above, if we get back a kernel virtual address
+that has more than 2 bytes space to the end of page, we know it’s in this page,
+another inspection is not necessary.
+
+The greatest number will also be 2. If it’s not contiguous or if it’s contiguous
+but we get back a kernel virtual address that only 1 byte far from the end of
+page, we have to inspect where the other byte is located.
+
+We don’t see much room for improvement. 
+
 >> B5: Briefly describe your implementation of the "wait" system call
 >> and how it interacts with process termination.
+
+We implemented sys_wait in term of process_wait.
+
+We define a new struct child_process to hold the child’s exit status. And a list
+representing all children the parent owns (child_list) is added into parent’s thread struct. We also introduce a parent_id inside child’s struct, to ensure
+child can find parent and set it’s status if parent still exists. 
+
+A child_process is created and added to list whenever a child is created. The parent busy waits until the child exited. To improve this code, a lock or semaphore can be used instead of calling thread_yield() or busy waiting.
+
+If child calls sys_exit to exit, a boolean signal that indicate sys_exit
+is called and the child’s exit status (exit_code) will be set into the corresponding
+child_list struct in parent’s children list. 
+
+If child is terminated by kernel, the boolean signal mentioned above is remain
+as false, which will be seen by parent, and understood child is terminated by
+kernel.
+
+If parent terminates early, the list and all the structs in it will be free,
+then the child will find out the parent already exited and give up setting the
+status, continue to execute. 
+
+
 >> B6: Any access to user program memory at a user-specified address
 >> can fail due to a bad pointer value.  Such accesses must cause the
 >> process to be terminated.  System calls are fraught with such
@@ -116,6 +164,12 @@ and used by the file system calls.
 >> paragraphs, describe the strategy or strategies you adopted for
 >> managing these issues.  Give an example.
 
+Avoiding bad user memory access is done by checking before validating, by
+checking we mean using the function check_ptr_get we wrote to check whether it’s
+NULL, whether it’s a valid user address and whether it’s been mapped in the
+process’s page directory. Taking “write” system call as an example, the void pointer buffer parameter was checked first, if it’s invalid, immediately call sys_exit to terminate. 
+
+Assuming that the user address has already been verified to be below PHYS_BASE and the a page fault in the kernel merely sets eax to 0xffffffff and copies its former value into eip, but an error still happens, we handle it in page_fault exception. The user page fault calls sys_exit, returning status as -1, and terminate the process. 
 
 ---- SYNCHRONIZATION ----
 >> B7: The "exec" system call returns -1 if loading the new executable
@@ -135,15 +189,49 @@ assembly call to actually kick off the new process.
 >> terminates without waiting, before C exits?  After C exits?  Are
 >> there any special cases?
 
+We use a child_process struct to hold each child process’s status, and a
+list of child_process (child_list) inside parent’s struct to represent all the children that
+the process has. And use a monitor to prevent race condition.
+
+Child is responsible to set it’s status in parent’s thread struct. When parent
+exits, the list inside it will be free.
+
+So, in the cases above:
+* P calls wait(C) before C exits
+P will monitor child->exit. If so, P busy waits by calling the function thread_yield() until it exits by checking the child’s exit status. Then parent retrieves the child’s exit status. 
+
+* P calls wait(C) after C exits
+P will monitor child->exit and found out C already exits and check it’s exit
+status (exit_code) directly.
+
+* P terminates without waiting before C exits
+The list inside P will be free. When C tries
+to set it’s status and find out parent has exited, it will ignore it and
+continue to execute.
+
+* P terminates after C exits
+The same thing happen to P, which is free all the resources P has. 
 
 ---- RATIONALE ----
 >> B9: Why did you choose to implement access to user memory from the
 >> kernel in the way that you did?
+
+//TODO
+
 >> B10: What advantages or disadvantages can you see to your design
 >> for file descriptors?
+
+We created the struct opened_file that has a list element for file descriptor table.  The actual file descriptor table is maintained in the thread struct.
+
+Advantage:
+-Kernel is aware of all opened file, which gains more flexibility to manipulate the opened file
+
+Disadvantage:
+-Consumes kernel space, user program may open lots of files that the kernel may not be able to handle. 
+
 >> B11: The default tid_t to pid_t mapping is the identity mapping.
 >> If you changed it, what advantages are there to your approach?
-
+No changes were made.
 
 			   SURVEY QUESTIONS
 			   ================
