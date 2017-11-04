@@ -5,27 +5,50 @@
 		     +--------------------------+
 ---- GROUP ----
 >> Fill in the names and email addresses of your group members.
-FirstName LastName <email@domain.example>
-FirstName LastName <email@domain.example>
-FirstName LastName <email@domain.example>
+Amy Reed, amy_hindman@yahoo.com
+Carmina Francia carmina_francia32@yahoo.com
+
 ---- PRELIMINARIES ----
->> If you have any preliminary comments on your submission, notes for the
->> TAs, or extra credit, please give them here.
->> Please cite any offline or online sources you consulted while
->> preparing your submission, other than the Pintos documentation, course
->> text, lecture notes, and course staff.
+Professor noted the multi-oom test was extra credit, this should be working
+in our assignment.
+
 			   ARGUMENT PASSING
 			   ================
 ---- DATA STRUCTURES ----
 >> A1: Copy here the declaration of each new or changed `struct' or
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
+
+process.c:
+
+The following two structures were created in class to keep the child
+process command and arguments.
+typedef struct{
+  char *name;
+  int len;
+}args_t;
+
+typedef  struct  {
+  int argc;
+  args_t args[100];
+} child_t;
+
 ---- ALGORITHMS ----
 >> A2: Briefly describe how you implemented argument parsing.  How do
 >> you arrange for the elements of argv[] to be in the right order?
 >> How do you avoid overflowing the stack page?
+Argument passing was implemented in class and we used the professors
+code. Two structs were created to hold the command and null terminated strings.
+The child struct which contains the command and arguments are passed into
+the create_thread function.  Here the command and arguments are retreived and
+placed onto the stack starting with the last argument placed at the bottom, thus 
+the top of the stack will contain the command, followed by the necessary arguments.
+
 ---- RATIONALE ----
 >> A3: Why does Pintos implement strtok_r() but not strtok()?
+strtok_r() is rentrant therefore execution could be interrupted and
+then restarted and it should keep correct behavior. It can be called by multiple
+threads and perform correctly.
 
 			     SYSTEM CALLS
 			     ============
@@ -33,9 +56,41 @@ FirstName LastName <email@domain.example>
 >> B1: Copy here the declaration of each new or changed `struct' or
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
+
+thread.h:
+The following structure is part of a list containing all data for managing all child
+processes containing items like id, necessary synchronization elements, and pointer
+to actual thread struct.
+is created, includes the ID
+struct child_process {
+   struct list_elem elem;
+   int pid;
+   int exit_code;
+   bool exit;
+   bool wait;
+   struct thread *process;
+   char *file_name;
+   struct semaphore sema;
+};
+List element for file descriptor table.  The actual file descriptor table is 
+maintained in the thread struct.
+struct opened_file {
+   struct list_elem elem;
+   int fd;
+   struct file* file;
+};
+
+thread.c
+Global file system lock
+struct lock fs_lock; 
+
 >> B2: Describe how file descriptors are associated with open files.
 >> Are file descriptors unique within the entire OS or just within a
 >> single process?
+A file descriptor in our program is unique only to a process.  It has
+a relationship to the actual file pointer returned when a file is opened
+and used by the file system calls.
+
 ---- ALGORITHMS ----
 >> B3: Describe your code for reading and writing user data from the
 >> kernel.
@@ -60,17 +115,27 @@ FirstName LastName <email@domain.example>
 >> allocated resources (locks, buffers, etc.) are freed?  In a few
 >> paragraphs, describe the strategy or strategies you adopted for
 >> managing these issues.  Give an example.
+
+
 ---- SYNCHRONIZATION ----
 >> B7: The "exec" system call returns -1 if loading the new executable
 >> fails, so it cannot return before the new executable has completed
 >> loading.  How does your code ensure this?  How is the load
 >> success/failure status passed back to the thread that calls "exec"?
+We use a semaphore for synchronization between the parent and child. The
+parent lets the child process proceed via a semaphore once it has 
+obtained the thread ID, and then the parent uses a semaphore to wait for 
+all of the thread/process setup occurs and can proceed right before the
+assembly call to actually kick off the new process.
+
 >> B8: Consider parent process P with child process C.  How do you
 >> ensure proper synchronization and avoid race conditions when P
 >> calls wait(C) before C exits?  After C exits?  How do you ensure
 >> that all resources are freed in each case?  How about when P
 >> terminates without waiting, before C exits?  After C exits?  Are
 >> there any special cases?
+
+
 ---- RATIONALE ----
 >> B9: Why did you choose to implement access to user memory from the
 >> kernel in the way that you did?
@@ -78,6 +143,8 @@ FirstName LastName <email@domain.example>
 >> for file descriptors?
 >> B11: The default tid_t to pid_t mapping is the identity mapping.
 >> If you changed it, what advantages are there to your approach?
+
+
 			   SURVEY QUESTIONS
 			   ================
 Answering these questions is optional, but it will help us improve the
@@ -87,11 +154,27 @@ choose to respond anonymously in the course evaluations at the end of
 the quarter.
 >> In your opinion, was this assignment, or any one of the three problems
 >> in it, too easy or too hard?  Did it take too long or too little time?
+Had we been required to complete the setup stack/child arguments portion of
+the assignment without help. This would have been very challenging so having 
+the assistance with this portion was very reasonable. The assignment in the way
+it was set up and given was very reasonable for the time we had, and was 
+consistent with other homeworks.
+
 >> Did you find that working on a particular part of the assignment gave
 >> you greater insight into some aspect of OS design?
+Working with the filesystem calls, file descriptor table, and examining
+the filesystem implementation gave a great deal of insight into OS design.
+The exec/wait implementation also gave good insight into the OS functions
+we made use of earlier in the course.
+
 >> Is there some particular fact or hint we should give students in
 >> future quarters to help them solve the problems?  Conversely, did you
 >> find any of our guidance to be misleading?
+I would continue to do the in class portions for setting up the stack,
+showing how to execute a test, and run the debugger with gcc.  
+
 >> Do you have any suggestions for the TAs to more effectively assist
 >> students, either for future quarters or the remaining projects?
 >> Any other comments?
+The level of guidance form the professor and TA were appropriate to make
+the assignment educational but still challenging.
