@@ -95,7 +95,15 @@ and used by the file system calls.
 >> B3: Describe your code for reading and writing user data from the
 >> kernel.
 
-//TODO
+Whenever user data is accessed we very that the address is valid first.
+We implement the second mechanism discussed in the homework documentation
+where we first verify that a user provided pointer is below PHYS_BASE, we
+then call a function to verify that the pointer is valid by dereferencing it.
+With the dereference if a fault occurs the address is not valid and the
+call will exit and return -1. We used the code provided by the documentention
+to read or write a byte to execute the dereference.  When a failure 
+occurs, the page code fault was modified and the call exits and indicates 
+the failure.
 
 >> B4: Suppose a system call causes a full page (4,096 bytes) of data
 >> to be copied from user space into the kernel.  What is the least
@@ -176,6 +184,7 @@ Assuming that the user address has already been verified to be below PHYS_BASE a
 >> fails, so it cannot return before the new executable has completed
 >> loading.  How does your code ensure this?  How is the load
 >> success/failure status passed back to the thread that calls "exec"?
+
 We use a semaphore for synchronization between the parent and child. The
 parent lets the child process proceed via a semaphore once it has 
 obtained the thread ID, and then the parent uses a semaphore to wait for 
@@ -216,7 +225,11 @@ The same thing happen to P, which is free all the resources P has.
 >> B9: Why did you choose to implement access to user memory from the
 >> kernel in the way that you did?
 
-//TODO
+We chose to use the second method described in documentation to verify the address
+location was below PHYS_BASE and then dereference the pointer.  We chose this method
+as the documentation seemed to indicate this was the most appropriate way to handle 
+this check, in addition we did not have as much familiarity with virtual memory
+and the methods that would be required in method 1.
 
 >> B10: What advantages or disadvantages can you see to your design
 >> for file descriptors?
@@ -242,6 +255,7 @@ choose to respond anonymously in the course evaluations at the end of
 the quarter.
 >> In your opinion, was this assignment, or any one of the three problems
 >> in it, too easy or too hard?  Did it take too long or too little time?
+
 Had we been required to complete the setup stack/child arguments portion of
 the assignment without help. This would have been very challenging so having 
 the assistance with this portion was very reasonable. The assignment in the way
@@ -266,3 +280,7 @@ showing how to execute a test, and run the debugger with gcc.
 >> Any other comments?
 The level of guidance form the professor and TA were appropriate to make
 the assignment educational but still challenging.
+
+Again - for future classes, the portion we reviewed in class were extremely helpful
+to allowing us to complete this assignment.  Critical pieces for success were showing how to run the test,
+some examples with the debugger, and actually having t
