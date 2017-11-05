@@ -1,5 +1,5 @@
-		     +--------------------------+
-       	       	     |		EE461S		|
+﻿		     +--------------------------+
+       	     |		EE461S		|
 		     | PROJECT 2: USER PROGRAMS	|
 		     | 	   DESIGN DOCUMENT     	|
 		     +--------------------------+
@@ -283,4 +283,5 @@ the assignment educational but still challenging.
 
 Again - for future classes, the portion we reviewed in class were extremely helpful
 to allowing us to complete this assignment.  Critical pieces for success were showing how to run the test,
-some examples with the debugger, and actually having t
+some examples with the debugger, and actually having the professor walk us through setting
+up the arguments - i.e. setup stack implementation.
